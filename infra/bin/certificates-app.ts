@@ -17,6 +17,18 @@ if (!awsAccountId) {
   throw new Error('AWS_ACCOUNT_ID must be set in .env file or CDK_DEFAULT_ACCOUNT environment variable')
 }
 
+console.log(`
+ /$$   /$$  /$$$$$$          /$$      /$$ /$$$$$$$$ /$$      /$$ /$$$$$$$$
+| $$  | $$ /$$__  $$        | $$$    /$$$| $$_____/| $$$    /$$$| $$_____/
+| $$  | $$| $$  \ $$        | $$$$  /$$$$| $$      | $$$$  /$$$$| $$
+| $$$$$$$$| $$  | $$ /$$$$$$| $$ $$/$$ $$| $$$$$   | $$ $$/$$ $$| $$$$$
+| $$__  $$| $$  | $$|______/| $$  $$$| $$| $$__/   | $$  $$$| $$| $$__/
+| $$  | $$| $$/$$ $$        | $$\  $ | $$| $$      | $$\  $ | $$| $$
+| $$  | $$|  $$$$$$/        | $$ \/  | $$| $$$$$$$$| $$ \/  | $$| $$$$$$$$
+|__/  |__/ \____ $$$        |__/     |__/|________/|__/     |__/|________/
+                \__/
+                                                                          `)
+
 // Create certificates stack in us-east-1 (required for CloudFront)
 new CloudFrontCertificatesStack(app, `${config.projectName}-${config.environment}-certificates-stack`, {
   env: {
