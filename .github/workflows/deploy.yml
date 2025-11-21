@@ -173,15 +173,7 @@ jobs:
           npm ci
           npm run build
 
-      - name: Verify compiled output
-        working-directory: infra
-        run: |
-          echo "Listing infra/lib contents"
-          ls -la lib || true
-          echo "Listing infra/lib/bin contents"
-          ls -la lib/bin || true
-
-      - name: CDK Deploy (infra + backend) using compiled JS
+      - name: CDK Deploy (infra + backend)
         working-directory: infra
         run: |
           # Deploy certificates stack first (if present)

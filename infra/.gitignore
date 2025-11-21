@@ -9,6 +9,5 @@ cdk.out
 *.log
 *.zip
 .DS_Store
-lib
 
 .env
