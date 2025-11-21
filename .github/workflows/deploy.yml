@@ -1,0 +1,132 @@
+name: CI / Deploy
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "frontend/**"
+      - "infra/**"
+      - "backend/**"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  detect-changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      infra: ${{ steps.filter.outputs.infra }}
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+            infra:
+              - 'infra/**'
+            backend:
+              - 'backend/**'
+
+  deploy-frontend:
+    name: Build & Deploy Frontend
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.frontend == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ACTIONS_ROLE_GITHUB }}
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Prepare infra tooling (install deps)
+        working-directory: infra
+        run: |
+          npm ci
+
+      - name: Generate frontend .env
+        run: |
+          npx ts-node scripts/inject-frontend-env.ts
+        working-directory: infra
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: |
+          npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run build
+
+      - name: Get frontend bucket name from CloudFormation
+        id: cf
+        run: |
+          FRONTEND_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name hqmemes-prod-stack \
+            --region ca-central-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+            --output text)
+          echo "FRONTEND_BUCKET=$FRONTEND_BUCKET" >> $GITHUB_ENV
+
+      - name: Sync to S3
+        run: |
+          aws s3 sync frontend/dist/ "s3://${FRONTEND_BUCKET}" --delete --region ca-central-1
+
+      - name: Invalidate CloudFront
+        run: |
+          CLOUDFRONT_ID=$(aws cloudformation describe-stacks \
+            --stack-name hqmemes-prod-stack \
+            --region ca-central-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+            --output text)
+          aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_ID" --paths "/*"
+
+  deploy-infra-backend:
+    name: Deploy Infra / Backend (CDK)
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.infra == 'true' || needs.detect-changes.outputs.backend == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ACTIONS_ROLE_GITHUB }}
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install infra deps
+        working-directory: infra
+        run: |
+          npm ci
+          npm run build || true
+
+      - name: CDK Deploy (infra + backend)
+        working-directory: infra
+        run: |
+          # Deploy certificates stack first (if present)
+          npx cdk deploy hqmemes-prod-certificates-stack --require-approval never || true
+          # Deploy main stack
+          npx cdk deploy hqmemes-prod-stack --require-approval never
