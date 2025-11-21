@@ -173,10 +173,43 @@ jobs:
           npm ci
           npm run build
 
-      - name: CDK Deploy (infra + backend)
+      - name: Deploy certificates stack (us-east-1)
         working-directory: infra
         run: |
           # Deploy certificates stack first (if present)
-          npx cdk deploy hqmemes-prod-certificates-stack --require-approval never || true
-          # Deploy main stack
+          npx cdk deploy hqmemes-prod-certificates-stack --require-approval never
+
+      - name: Wait for ACM issuance (poll)
+        run: |
+          FRONTEND_CERT_ARN=$(aws cloudformation describe-stacks \
+            --stack-name hqmemes-prod-certificates-stack \
+            --region us-east-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendCertificateArn'].OutputValue" \
+            --output text)
+          ASSETS_CERT_ARN=$(aws cloudformation describe-stacks \
+            --stack-name hqmemes-prod-certificates-stack \
+            --region us-east-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='AssetsCertificateArn'].OutputValue" \
+            --output text)
+          echo "Frontend cert ARN: $FRONTEND_CERT_ARN"
+          echo "Assets cert ARN: $ASSETS_CERT_ARN"
+          # Poll until issued (timeout after N attempts)
+          for i in $(seq 1 30); do
+            status=$(aws acm describe-certificate --certificate-arn "$FRONTEND_CERT_ARN" --region us-east-1 --query 'Certificate.Status' --output text)
+            echo "Frontend cert status: $status (attempt $i)"
+            if [ "$status" = "ISSUED" ]; then break; fi
+            sleep 10
+          done
+          if [ "$status" != "ISSUED" ]; then
+            echo "Certificate not issued yet; aborting main deploy"
+            exit 1
+          fi
+          echo "FRONTEND_CERT_ARN=$FRONTEND_CERT_ARN" >> $GITHUB_ENV
+          echo "ASSETS_CERT_ARN=$ASSETS_CERT_ARN" >> $GITHUB_ENV
+
+      - name: Deploy main stack (ca-central-1) certificate ARNs
+        working-directory: infra
+        run: |
+          FRONTEND_CERT_ARN="${{ env.FRONTEND_CERT_ARN }}" \
+          ASSETS_CERT_ARN="${{ env.ASSETS_CERT_ARN }}" \
           npx cdk deploy hqmemes-prod-stack --require-approval never
