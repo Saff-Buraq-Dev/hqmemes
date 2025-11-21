@@ -1,0 +1,36 @@
+{
+  "name": "hqmemes-infrastructure",
+  "version": "1.0.0",
+  "description": "HQMemes infrastructure as code using AWS CDK",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "cdk": "cdk",
+    "deploy": "cdk deploy --all --require-approval never",
+    "destroy": "cdk destroy --all",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "bootstrap": "cdk bootstrap aws://ACCOUNT-ID/ca-central-1 aws://ACCOUNT-ID/us-east-1"
+  },
+  "keywords": [
+    "aws",
+    "cdk",
+    "infrastructure"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "aws-cdk-lib": "^2.150.0",
+    "constructs": "^10.3.0",
+    "dotenv": "^16.4.5",
+    "@aws-cdk/aws-lambda-python-alpha": "^2.150.0-alpha.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "typescript": "~5.4.5",
+    "aws-cdk": "^2.150.0",
+    "ts-node": "^10.9.2"
+  }
+}

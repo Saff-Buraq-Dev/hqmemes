@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.tfvars
+!terraform.tfvars.example
+
+# Specific env files
+.env.production
+
+# CDK / build artifacts to ignore
+infra/main-out/
+infra/certificates-out/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Build outputs
+frontend/dist/
+backend/dist/
+backend/lambda.zip
+backend/package/
+*.zip
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# AWS
+.aws-sam/
+
+# Python
+venv/
+env/
+*.pyc
+.pytest_cache/
+
+# Coverage
+coverage/
+.nyc_output/
+

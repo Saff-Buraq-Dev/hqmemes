@@ -1,0 +1,508 @@
+openapi: 3.1.3
+info:
+  title: HQ-Memes API
+  description: API pour l'application de partage de memes HQ-Memes
+  version: 1.0.0
+  contact:
+    name: HQ-Memes Team
+
+servers:
+  - url: https://api-hqmemems.dev.gharbidev.com
+    description: Production
+  - url: http://localhost:3000
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token from AWS Cognito
+
+  schemas:
+    User:
+      type: object
+      properties:
+        userId:
+          type: string
+          description: User ID from Cognito
+        username:
+          type: string
+          minLength: 3
+          maxLength: 20
+        email:
+          type: string
+          format: email
+        avatarUrl:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - userId
+        - username
+        - email
+        - avatarUrl
+        - createdAt
+
+    Meme:
+      type: object
+      properties:
+        memeId:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        uploaderId:
+          type: string
+        uploader:
+          $ref: '#/components/schemas/UserBasic'
+        categories:
+          type: array
+          items:
+            type: string
+        likesCount:
+          type: integer
+          minimum: 0
+        likes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Like'
+        isLiked:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - memeId
+        - name
+        - url
+        - uploaderId
+        - categories
+        - likesCount
+        - createdAt
+
+    UserBasic:
+      type: object
+      properties:
+        userId:
+          type: string
+        username:
+          type: string
+        avatarUrl:
+          type: string
+
+    Like:
+      type: object
+      properties:
+        userId:
+          type: string
+        username:
+          type: string
+        avatarUrl:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Category:
+      type: object
+      properties:
+        categoryId:
+          type: string
+        name:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - categoryId
+        - name
+        - count
+        - createdAt
+
+    PaginatedMemes:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Meme'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        hasMore:
+          type: boolean
+
+    PresignedUrlRequest:
+      type: object
+      properties:
+        filename:
+          type: string
+        contentType:
+          type: string
+      required:
+        - filename
+        - contentType
+
+    PresignedUrlResponse:
+      type: object
+      properties:
+        uploadUrl:
+          type: string
+        fileUrl:
+          type: string
+        memeId:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        detail:
+          type: string
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Vérifier le statut de l'API
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  environment:
+                    type: string
+                    example: production
+
+  /auth/signup:
+    post:
+      summary: Create user
+      description: Créer un utilisateur après inscription Cognito
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                username:
+                  type: string
+              required:
+                - userId
+                - email
+                - username
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/me:
+    get:
+      summary: Get current user
+      description: Récupérer le profil de l'utilisateur actuel
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      summary: Update current user
+      description: Mettre à jour le profil utilisateur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                avatarUrl:
+                  type: string
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memes:
+    get:
+      summary: Get memes
+      description: Récupérer les memes avec filtres et pagination
+      parameters:
+        - name: uploaderId
+          in: query
+          schema:
+            type: string
+        - name: categories
+          in: query
+          schema:
+            type: string
+          description: Comma-separated categories
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [recent, popular]
+            default: recent
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Memes list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMemes'
+
+    post:
+      summary: Create meme
+      description: Créer un meme après upload S3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                memeId:
+                  type: string
+                name:
+                  type: string
+                url:
+                  type: string
+                categories:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - memeId
+                - name
+                - url
+      responses:
+        '201':
+          description: Meme created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meme'
+
+  /memes/{memeId}:
+    get:
+      summary: Get meme
+      description: Récupérer un meme spécifique
+      parameters:
+        - name: memeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Meme details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meme'
+        '404':
+          description: Meme not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete meme
+      description: Supprimer un meme (seulement par l'uploader)
+      parameters:
+        - name: memeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Meme deleted
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Meme not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memes/{memeId}/like:
+    post:
+      summary: Toggle like
+      description: Liker ou unliker un meme
+      parameters:
+        - name: memeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Like toggled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  isLiked:
+                    type: boolean
+                  likesCount:
+                    type: integer
+        '404':
+          description: Meme not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memes/{memeId}/likes:
+    get:
+      summary: Get meme likes
+      description: Récupérer tous les likes d'un meme
+      parameters:
+        - name: memeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Likes list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Like'
+
+  /categories:
+    get:
+      summary: Get categories
+      description: Récupérer toutes les catégories
+      responses:
+        '200':
+          description: Categories list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+
+    post:
+      summary: Create category
+      description: Créer une nouvelle catégorie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+              required:
+                - name
+      responses:
+        '201':
+          description: Category created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+
+  /upload/presigned:
+    post:
+      summary: Get presigned URL
+      description: Obtenir une URL présignée S3 pour upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresignedUrlRequest'
+      responses:
+        '200':
+          description: Presigned URL generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedUrlResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
