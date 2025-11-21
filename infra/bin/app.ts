@@ -2,13 +2,16 @@
 import 'source-map-support/register'
 import * as cdk from 'aws-cdk-lib'
 import { HQMemesStack } from '../lib/hqmemes-stack'
+import { CloudFrontCertificatesStack } from '../lib/stacks/cloudfront-certificates-stack'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
+import { getConfig } from '../lib/config'
 
 // Load environment variables
 dotenv.config({ path: path.join(__dirname, '../.env') })
 
 const app = new cdk.App()
+const config = getConfig()
 
 // Get environment variables
 const awsRegion = process.env.AWS_REGION || 'ca-central-1'
@@ -31,7 +34,25 @@ console.log(`
 | $$  | $$|  $$$$$$/        | $$ \/  | $$| $$$$$$$$| $$ \/  | $$| $$$$$$$$
 |__/  |__/ \____ $$$        |__/     |__/|________/|__/     |__/|________/
                 \__/
-                                                                          `)
+                `)
+
+// Create certificates stack in us-east-1 (required for CloudFront)
+new CloudFrontCertificatesStack(app, `${config.projectName}-${config.environment}-certificates-stack`, {
+  env: {
+    account: awsAccountId,
+    region: 'us-east-1', // CloudFront requires us-east-1
+  },
+  frontendDomain: config.frontendDomain,
+  assetsDomain: config.assetsDomain,
+  hostedZoneId: config.hostedZoneId,
+  description: `HQMemes ${config.environment} CloudFront certificates (us-east-1)`,
+  tags: {
+    Project: config.projectName,
+    Environment: config.environment,
+    ManagedBy: 'cdk',
+  },
+})
+
 // Create the main stack
 new HQMemesStack(app, `${projectName}-${environment}-stack`, {
   env: {
