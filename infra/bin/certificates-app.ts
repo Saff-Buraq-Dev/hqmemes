@@ -4,10 +4,31 @@ import * as cdk from 'aws-cdk-lib'
 import { CloudFrontCertificatesStack } from '../lib/stacks/cloudfront-certificates-stack'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
+import * as fs from 'fs'
 import { getConfig } from '../lib/config'
 
 // Load environment variables
-dotenv.config({ path: path.join(__dirname, '../.env') })
+// The runtime path may differ between ts-node (infra/bin) and compiled JS (infra/lib/bin).
+// Try multiple candidate locations and pick the first existing .env file.
+const candidateEnvPaths = [
+  path.join(__dirname, '../.env'),     // ts-node: infra/bin/../.env => infra/.env
+  path.join(__dirname, '../../.env'),  // compiled: infra/lib/bin/../../.env => infra/.env
+  path.join(process.cwd(), 'infra/.env'), // explicit fallback
+]
+
+let loadedEnv: string | undefined
+for (const p of candidateEnvPaths) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p })
+    loadedEnv = p
+    console.log(`Loaded environment from ${p}`)
+    break
+  }
+}
+
+if (!loadedEnv) {
+  console.warn('No infra/.env file found in expected locations; continuing without loading .env')
+}
 
 const app = new cdk.App()
 const config = getConfig()
