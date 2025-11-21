@@ -77,6 +77,17 @@ export class HQMemesStack extends cdk.Stack {
     // 2. Use environment variables for certificate ARNs
     const frontendCertArn = process.env.FRONTEND_CERTIFICATE_ARN
     const assetsCertArn = process.env.ASSETS_CERTIFICATE_ARN
+
+
+    console.log("******************************")
+    console.log("******************************")
+    console.log("******************************")
+    console.log(frontendCertArn);
+    console.log(assetsCertArn);
+    console.log("******************************")
+    console.log("******************************")
+    console.log("******************************")
+
     
     const cloudFrontStack = new CloudFrontStack(this, 'CloudFrontStack', {
       projectName: config.projectName,

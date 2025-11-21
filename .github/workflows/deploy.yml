@@ -210,6 +210,10 @@ jobs:
       - name: Deploy main stack (ca-central-1) certificate ARNs
         working-directory: infra
         run: |
-          FRONTEND_CERT_ARN="${{ env.FRONTEND_CERT_ARN }}" \
-          ASSETS_CERT_ARN="${{ env.ASSETS_CERT_ARN }}" \
+          # Use the shell-exported ARNs (written to $GITHUB_ENV in the previous step)
+          echo "Using FRONTEND_CERT_ARN=$FRONTEND_CERT_ARN"
+          echo "Using ASSETS_CERT_ARN=$ASSETS_CERT_ARN"
+
+          export FRONTEND_CERTIFICATE_ARN="$FRONTEND_CERT_ARN"
+          export ASSETS_CERTIFICATE_ARN="$ASSETS_CERT_ARN"
           npx cdk deploy hqmemes-prod-stack --require-approval never
