@@ -12,8 +12,13 @@ import { execSync } from 'child_process'
 const cdkOutputsPath = path.join(__dirname, '../../cdk.out')
 const envPath = path.join(__dirname, '../../.env')
 
-// Load environment variables
-dotenv.config({ path: envPath })
+// Load environment variables (try infra/.env first, then root .env)
+const infraEnvPath = path.join(__dirname, '../.env')
+if (fs.existsSync(infraEnvPath)) {
+  dotenv.config({ path: infraEnvPath })
+} else {
+  dotenv.config({ path: envPath })
+}
 
 // Read CDK outputs if they exist
 let cdkOutputs: Record<string, any> = {}

@@ -113,6 +113,20 @@ jobs:
         run: |
           npx ts-node scripts/inject-frontend-env.ts
 
+      - name: "Debug: show Cognito CloudFormation outputs and frontend .env"
+        working-directory: infra
+        run: |
+          echo "--- CloudFormation Cognito outputs ---"
+          aws cloudformation describe-stacks \
+            --stack-name hqmemes-prod-stack \
+            --region ca-central-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolId' || OutputKey=='CognitoClientId']" \
+            --output table || true
+          echo "--- infra/.env (for reference) ---"
+          sed -n '1,200p' infra/.env || true
+          echo "--- frontend/.env (generated) ---"
+          sed -n '1,200p' ../frontend/.env || true
+
       - name: Install frontend deps
         working-directory: frontend
         run: |
