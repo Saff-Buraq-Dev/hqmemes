@@ -12,6 +12,11 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  AWS_REGION: ca-central-1
+  PROJECT_NAME: hqmemes
+  ENVIRONMENT: prod
+
 jobs:
   detect-changes:
     name: Detect changes
@@ -38,231 +43,90 @@ jobs:
             backend:
               - 'backend/**'
 
-  deploy-frontend-only:
-    name: Build & Deploy Frontend (no infra change)
+  # Deploy certificates separately - only when infra changed
+  deploy-certificates:
+    name: Deploy CloudFront Certificates (us-east-1)
     needs: detect-changes
     runs-on: ubuntu-latest
-    env:
-      AWS_REGION: ca-central-1
-    if: needs.detect-changes.outputs.frontend == 'true' && needs.detect-changes.outputs.infra == 'false'
+    if: needs.detect-changes.outputs.infra == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.ACTIONS_ROLE_GITHUB }}
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: us-east-1
 
-      - name: Get Cognito outputs from CloudFormation
-        id: cognito
-        run: |
-          # Try to read existing stack outputs so frontend build gets correct Cognito IDs
-          set -euo pipefail
-          COGNITO_USER_POOL_ID=$(aws cloudformation describe-stacks \
-            --stack-name hqmemes-prod-stack \
-            --region ca-central-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolId'].OutputValue" \
-            --output text || true)
-          COGNITO_CLIENT_ID=$(aws cloudformation describe-stacks \
-            --stack-name hqmemes-prod-stack \
-            --region ca-central-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='CognitoClientId'].OutputValue" \
-            --output text || true)
-          echo "COGNITO_USER_POOL_ID=$COGNITO_USER_POOL_ID" >> $GITHUB_ENV
-          echo "COGNITO_CLIENT_ID=$COGNITO_CLIENT_ID" >> $GITHUB_ENV
-
-      - name: Prepare infra tooling (install deps)
-        working-directory: infra
-        run: |
-          npm ci
-
-      - name: Create `infra/.env` from secrets
-        run: |
-          set -euo pipefail
-          cat > infra/.env <<EOF
-          AWS_REGION=ca-central-1
-          AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
-          PROJECT_NAME=hqmemes
-          ENVIRONMENT=prod
-
-          DOMAIN_NAME=${{ secrets.DOMAIN_NAME }}
-          HOSTED_ZONE_ID=${{ secrets.HOSTED_ZONE_ID }}
-
-          FRONTEND_DOMAIN=hqmemes.${{ secrets.DOMAIN_NAME }}
-          ASSETS_DOMAIN=assets-hqmemes.${{ secrets.DOMAIN_NAME }}
-          API_DOMAIN=api-hqmemes.${{ secrets.DOMAIN_NAME }}
-
-          # Cognito outputs (may be empty if infra not yet deployed)
-          COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
-          COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-}
-
-          VITE_APP_NAME=HQMemes
-          VITE_MAX_UPLOAD_SIZE=10485760
-          VITE_MAX_FILES_PER_UPLOAD=10
-          VITE_POLLING_INTERVAL=5000
-          EOF
-        shell: bash
-
-      - name: Run inject script to write `frontend/.env`
-        working-directory: infra
-        run: |
-          npx ts-node scripts/inject-frontend-env.ts
-
-      - name: "Debug: show Cognito CloudFormation outputs and frontend .env"
-        working-directory: infra
-        run: |
-          echo "--- CloudFormation Cognito outputs ---"
-          aws cloudformation describe-stacks \
-            --stack-name hqmemes-prod-stack \
-            --region ca-central-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolId' || OutputKey=='CognitoClientId']" \
-            --output table || true
-          echo "--- infra/.env (for reference) ---"
-          sed -n '1,200p' infra/.env || true
-          echo "--- frontend/.env (generated) ---"
-          sed -n '1,200p' ../frontend/.env || true
-
-      - name: Install frontend deps
-        working-directory: frontend
-        run: |
-          npm ci
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
-
-      - name: Get frontend bucket name from CloudFormation
-        id: cf
-        run: |
-          FRONTEND_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name hqmemes-prod-stack \
-            --region ca-central-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
-            --output text)
-          echo "FRONTEND_BUCKET=$FRONTEND_BUCKET" >> $GITHUB_ENV
-
-      - name: Sync to S3
-        run: |
-          aws s3 sync frontend/dist/ "s3://${FRONTEND_BUCKET}" --delete --region ca-central-1
-
-      - name: Invalidate CloudFront
-        run: |
-          CLOUDFRONT_ID=$(aws cloudformation describe-stacks \
-            --stack-name hqmemes-prod-stack \
-            --region ca-central-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
-            --output text)
-          aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_ID" --paths "/*"
-
-  deploy-frontend-after-infra:
-    name: Build & Deploy Frontend (after infra)
-    needs: [detect-changes, deploy-infra-backend]
-    runs-on: ubuntu-latest
-    env:
-      AWS_REGION: ca-central-1
-    # Run this variant only when frontend changed AND infra/backend changed
-    if: needs.detect-changes.outputs.frontend == 'true' && (needs.detect-changes.outputs.infra == 'true' || needs.detect-changes.outputs.backend == 'true')
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-infra-env
         with:
-          fetch-depth: 0
+          aws-region: us-east-1
+          domain-name: ${{ secrets.DOMAIN_NAME }}
+          hosted-zone-id: ${{ secrets.HOSTED_ZONE_ID }}
+          aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.ACTIONS_ROLE_GITHUB }}
-          role-session-name: GitHub_to_AWS_via_FederatedOIDC
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Prepare infra tooling (install deps)
+      - name: Deploy certificates stack
         working-directory: infra
-        run: |
-          npm ci
+        run: npm run deploy:certificates
 
-      - name: Create `infra/.env` from secrets
+      - name: Wait for ACM certificate validation
         run: |
           set -euo pipefail
-          cat > infra/.env <<EOF
-          AWS_REGION=ca-central-1
-          AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
-          PROJECT_NAME=hqmemes
-          ENVIRONMENT=prod
-
-          DOMAIN_NAME=${{ secrets.DOMAIN_NAME }}
-          HOSTED_ZONE_ID=${{ secrets.HOSTED_ZONE_ID }}
-
-          FRONTEND_DOMAIN=hqmemes.${{ secrets.DOMAIN_NAME }}
-          ASSETS_DOMAIN=assets-hqmemes.${{ secrets.DOMAIN_NAME }}
-          API_DOMAIN=api-hqmemes.${{ secrets.DOMAIN_NAME }}
-
-          # Cognito outputs placeholder (populated for frontend build if available)
-          COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
-          COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-}
-
-          VITE_APP_NAME=HQMemes
-          VITE_MAX_UPLOAD_SIZE=10485760
-          VITE_MAX_FILES_PER_UPLOAD=10
-          VITE_POLLING_INTERVAL=5000
-          EOF
-        shell: bash
-
-      - name: Run inject script to write `frontend/.env`
-        working-directory: infra
-        run: |
-          npx ts-node scripts/inject-frontend-env.ts
-
-      - name: Install frontend deps
-        working-directory: frontend
-        run: |
-          npm ci
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
-
-      - name: Get frontend bucket name from CloudFormation
-        id: cf
-        run: |
-          FRONTEND_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name hqmemes-prod-stack \
-            --region ca-central-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+          
+          FRONTEND_CERT_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-certificates-stack \
+            --region us-east-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendCertificateArn'].OutputValue" \
             --output text)
-          echo "FRONTEND_BUCKET=$FRONTEND_BUCKET" >> $GITHUB_ENV
-
-      - name: Sync to S3
-        run: |
-          aws s3 sync frontend/dist/ "s3://${FRONTEND_BUCKET}" --delete --region ca-central-1
-
-      - name: Invalidate CloudFront
-        run: |
-          CLOUDFRONT_ID=$(aws cloudformation describe-stacks \
-            --stack-name hqmemes-prod-stack \
-            --region ca-central-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+          
+          ASSETS_CERT_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-certificates-stack \
+            --region us-east-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='AssetsCertificateArn'].OutputValue" \
             --output text)
-          aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_ID" --paths "/*"
+          
+          echo "Frontend cert ARN: $FRONTEND_CERT_ARN"
+          echo "Assets cert ARN: $ASSETS_CERT_ARN"
+          
+          # Poll for certificate issuance (max 30 attempts × 10 seconds = 5 minutes)
+          for i in $(seq 1 30); do
+            status=$(aws acm describe-certificate \
+              --certificate-arn "$FRONTEND_CERT_ARN" \
+              --region us-east-1 \
+              --query 'Certificate.Status' \
+              --output text 2>/dev/null || echo "PENDING")
+            
+            echo "Certificate status: $status (attempt $i/30)"
+            
+            if [ "$status" = "ISSUED" ]; then
+              echo "✅ Certificates are ISSUED"
+              break
+            fi
+            
+            if [ $i -lt 30 ]; then
+              sleep 10
+            fi
+          done
+          
+          if [ "$status" != "ISSUED" ]; then
+            echo "❌ Certificates not issued after 5 minutes"
+            exit 1
+          fi
+          
+          echo "FRONTEND_CERT_ARN=$FRONTEND_CERT_ARN" >> $GITHUB_ENV
+          echo "ASSETS_CERT_ARN=$ASSETS_CERT_ARN" >> $GITHUB_ENV
 
-  deploy-infra-backend:
-    name: Deploy Infra / Backend (CDK)
-    needs: detect-changes
+  deploy-infra:
+    name: Deploy Infrastructure (ca-central-1)
+    needs: [detect-changes, deploy-certificates]
     runs-on: ubuntu-latest
-    env:
-      AWS_REGION: ca-central-1
     if: needs.detect-changes.outputs.infra == 'true' || needs.detect-changes.outputs.backend == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -271,80 +135,158 @@ jobs:
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Create `infra/.env` from secrets
+      - name: Setup environment
+        uses: ./.github/actions/setup-infra-env
+        with:
+          domain-name: ${{ secrets.DOMAIN_NAME }}
+          hosted-zone-id: ${{ secrets.HOSTED_ZONE_ID }}
+          aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Deploy application stack
+        working-directory: infra
+        run: npm run deploy:app
+
+  deploy-frontend-only:
+    name: Build & Deploy Frontend
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.frontend == 'true' && needs.detect-changes.outputs.infra == 'false'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ACTIONS_ROLE_GITHUB }}
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-infra-env
+        with:
+          domain-name: ${{ secrets.DOMAIN_NAME }}
+          hosted-zone-id: ${{ secrets.HOSTED_ZONE_ID }}
+          aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Get Cognito outputs from CloudFormation
+        id: cognito
         run: |
           set -euo pipefail
-          cat > infra/.env <<EOF
-          AWS_REGION=ca-central-1
-          AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
-          PROJECT_NAME=hqmemes
-          ENVIRONMENT=prod
+          
+          COGNITO_USER_POOL_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-stack \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolId'].OutputValue" \
+            --output text 2>/dev/null || true)
+          
+          COGNITO_CLIENT_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-stack \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='CognitoClientId'].OutputValue" \
+            --output text 2>/dev/null || true)
+          
+          echo "cognito-user-pool-id=$COGNITO_USER_POOL_ID" >> $GITHUB_OUTPUT
+          echo "cognito-client-id=$COGNITO_CLIENT_ID" >> $GITHUB_OUTPUT
 
-          DOMAIN_NAME=${{ secrets.DOMAIN_NAME }}
-          HOSTED_ZONE_ID=${{ secrets.HOSTED_ZONE_ID }}
-
-          FRONTEND_DOMAIN=hqmemes.${{ secrets.DOMAIN_NAME }}
-          ASSETS_DOMAIN=assets-hqmemes.${{ secrets.DOMAIN_NAME }}
-          API_DOMAIN=api-hqmemes.${{ secrets.DOMAIN_NAME }}
-
-          # Cognito outputs placeholder (populated for frontend build if available)
-          COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
-          COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID:-}
-
-          VITE_APP_NAME=HQMemes
-          VITE_MAX_UPLOAD_SIZE=10485760
-          VITE_MAX_FILES_PER_UPLOAD=10
-          VITE_POLLING_INTERVAL=5000
-          EOF
-        shell: bash
-
-      - name: Install infra deps and build
+      - name: Run inject script to write `frontend/.env`
         working-directory: infra
-        run: |
-          npm ci
-          npm run build
+        run: npx ts-node scripts/inject-frontend-env.ts
 
-      - name: Deploy certificates stack (us-east-1)
-        working-directory: infra
-        run: |
-          # Deploy certificates stack first (if present)
-          npx cdk deploy hqmemes-prod-certificates-stack --require-approval never
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
 
-      - name: Wait for ACM issuance (poll)
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Get frontend bucket name
+        id: bucket
         run: |
-          FRONTEND_CERT_ARN=$(aws cloudformation describe-stacks \
-            --stack-name hqmemes-prod-certificates-stack \
-            --region us-east-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='FrontendCertificateArn'].OutputValue" \
+          FRONTEND_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-stack \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
             --output text)
-          ASSETS_CERT_ARN=$(aws cloudformation describe-stacks \
-            --stack-name hqmemes-prod-certificates-stack \
-            --region us-east-1 \
-            --query "Stacks[0].Outputs[?OutputKey=='AssetsCertificateArn'].OutputValue" \
-            --output text)
-          echo "Frontend cert ARN: $FRONTEND_CERT_ARN"
-          echo "Assets cert ARN: $ASSETS_CERT_ARN"
-          # Poll until issued (timeout after N attempts)
-          for i in $(seq 1 30); do
-            status=$(aws acm describe-certificate --certificate-arn "$FRONTEND_CERT_ARN" --region us-east-1 --query 'Certificate.Status' --output text)
-            echo "Frontend cert status: $status (attempt $i)"
-            if [ "$status" = "ISSUED" ]; then break; fi
-            sleep 10
-          done
-          if [ "$status" != "ISSUED" ]; then
-            echo "Certificate not issued yet; aborting main deploy"
-            exit 1
-          fi
-          echo "FRONTEND_CERT_ARN=$FRONTEND_CERT_ARN" >> $GITHUB_ENV
-          echo "ASSETS_CERT_ARN=$ASSETS_CERT_ARN" >> $GITHUB_ENV
+          echo "name=$FRONTEND_BUCKET" >> $GITHUB_OUTPUT
 
-      - name: Deploy main stack (ca-central-1) certificate ARNs
-        working-directory: infra
+      - name: Sync to S3
         run: |
-          # Use the shell-exported ARNs (written to $GITHUB_ENV in the previous step)
-          echo "Using FRONTEND_CERT_ARN=$FRONTEND_CERT_ARN"
-          echo "Using ASSETS_CERT_ARN=$ASSETS_CERT_ARN"
+          aws s3 sync frontend/dist/ "s3://${{ steps.bucket.outputs.name }}" \
+            --delete \
+            --region ${{ env.AWS_REGION }}
 
-          export FRONTEND_CERTIFICATE_ARN="$FRONTEND_CERT_ARN"
-          export ASSETS_CERTIFICATE_ARN="$ASSETS_CERT_ARN"
-          npx cdk deploy hqmemes-prod-stack --require-approval never
+      - name: Invalidate CloudFront
+        run: |
+          CLOUDFRONT_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-stack \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+            --output text)
+          aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_ID" \
+            --paths "/*"
+
+
+  deploy-frontend-after-infra:
+    name: Build & Deploy Frontend (after infra update)
+    needs: [detect-changes, deploy-infra]
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.frontend == 'true' && (needs.detect-changes.outputs.infra == 'true' || needs.detect-changes.outputs.backend == 'true')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ACTIONS_ROLE_GITHUB }}
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-infra-env
+        with:
+          domain-name: ${{ secrets.DOMAIN_NAME }}
+          hosted-zone-id: ${{ secrets.HOSTED_ZONE_ID }}
+          aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Run inject script to write `frontend/.env`
+        working-directory: infra
+        run: npx ts-node scripts/inject-frontend-env.ts
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Get frontend bucket name
+        id: bucket
+        run: |
+          FRONTEND_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-stack \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+            --output text)
+          echo "name=$FRONTEND_BUCKET" >> $GITHUB_OUTPUT
+
+      - name: Sync to S3
+        run: |
+          aws s3 sync frontend/dist/ "s3://${{ steps.bucket.outputs.name }}" \
+            --delete \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Invalidate CloudFront
+        run: |
+          CLOUDFRONT_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-stack \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+            --output text)
+          aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_ID" \
+            --paths "/*"
