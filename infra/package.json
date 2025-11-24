@@ -8,11 +8,15 @@
     "watch": "tsc -w",
     "test": "jest",
     "cdk": "cdk",
-    "deploy": "cdk deploy --all --require-approval never",
-    "destroy": "cdk destroy --all",
     "synth": "cdk synth",
     "diff": "cdk diff",
-    "bootstrap": "cdk bootstrap aws://ACCOUNT-ID/ca-central-1 aws://ACCOUNT-ID/us-east-1"
+    "bootstrap": "cdk bootstrap aws://ACCOUNT-ID/ca-central-1 aws://ACCOUNT-ID/us-east-1",
+    "deploy:certificates": "cdk deploy --app 'npx ts-node bin/certificates.ts' --require-approval never",
+    "deploy:app": "cdk deploy --require-approval never",
+    "deploy": "npm run deploy:app",
+    "destroy": "cdk destroy --all",
+    "destroy:certificates": "cdk destroy --app 'npx ts-node bin/certificates.ts' --force",
+    "destroy:app": "cdk destroy --force"
   },
   "keywords": [
     "aws",

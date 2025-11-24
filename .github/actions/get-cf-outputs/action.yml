@@ -1,0 +1,50 @@
+name: Get CloudFormation Outputs
+
+description: "Retrieve CloudFormation stack outputs"
+
+inputs:
+  stack-name:
+    description: "CloudFormation stack name"
+    required: true
+  region:
+    description: "AWS region"
+    required: false
+    default: "ca-central-1"
+  output-keys:
+    description: "Comma-separated list of output keys to retrieve"
+    required: true
+
+outputs:
+  outputs:
+    description: "JSON object of outputs"
+    value: ${{ steps.get-outputs.outputs.result }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get stack outputs
+      id: get-outputs
+      run: |
+        set -euo pipefail
+
+        STACK_NAME="${{ inputs.stack-name }}"
+        REGION="${{ inputs.region }}"
+        KEYS="${{ inputs.output-keys }}"
+
+        # Build filter for output keys
+        QUERY=""
+        IFS=',' read -ra KEYS_ARRAY <<< "$KEYS"
+        for key in "${KEYS_ARRAY[@]}"; do
+          QUERY="$QUERY || OutputKey=='${key// }'"
+        done
+        QUERY="${QUERY:4}" # Remove leading " || "
+
+        # Get outputs
+        OUTPUTS=$(aws cloudformation describe-stacks \
+          --stack-name "$STACK_NAME" \
+          --region "$REGION" \
+          --query "Stacks[0].Outputs[?$QUERY]" \
+          --output json 2>/dev/null || echo "[]")
+
+        echo "result=$OUTPUTS" >> $GITHUB_OUTPUT
+      shell: bash

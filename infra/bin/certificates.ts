@@ -1,25 +1,31 @@
 #!/usr/bin/env node
 import 'source-map-support/register'
 import * as cdk from 'aws-cdk-lib'
-import { HQMemesStack } from '../lib/hqmemes-stack'
+import { CloudFrontCertificatesStack } from '../lib/stacks/cloudfront-certificates-stack'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
-import { getConfig } from '../lib/config'
 
 // Load environment variables
 dotenv.config({ path: path.join(__dirname, '../.env') })
 
 const app = new cdk.App()
-const config = getConfig()
 
 // Get environment variables
-const awsRegion = process.env.AWS_REGION || 'ca-central-1'
+const awsRegion = 'us-east-1' // CloudFront certificates must be in us-east-1
 const awsAccountId = process.env.AWS_ACCOUNT_ID || process.env.CDK_DEFAULT_ACCOUNT
 const projectName = process.env.PROJECT_NAME || 'hqmemes'
 const environment = process.env.ENVIRONMENT || 'prod'
 
 if (!awsAccountId) {
   throw new Error('AWS_ACCOUNT_ID must be set in .env file or CDK_DEFAULT_ACCOUNT environment variable')
+}
+
+const frontendDomain = process.env.FRONTEND_DOMAIN
+const assetsDomain = process.env.ASSETS_DOMAIN
+const hostedZoneId = process.env.HOSTED_ZONE_ID
+
+if (!frontendDomain || !assetsDomain || !hostedZoneId) {
+  throw new Error('FRONTEND_DOMAIN, ASSETS_DOMAIN, and HOSTED_ZONE_ID must be set')
 }
 
 console.log(`
@@ -34,24 +40,24 @@ console.log(`
                 \__/
 `)
 
-console.log(`🚀 Deploying HQMemes infrastructure to ${awsRegion}...`)
-console.log(`📝 Note: CloudFront certificates must be deployed separately to us-east-1`)
-console.log(`   Run: npm run deploy:certificates\n`)
+console.log(`🔐 Deploying CloudFront Certificates to us-east-1...`)
 
-// Create the main application stack
-new HQMemesStack(app, `${projectName}-${environment}-stack`, {
+// Create certificates stack in us-east-1 (required for CloudFront)
+new CloudFrontCertificatesStack(app, `${projectName}-${environment}-certificates-stack`, {
   env: {
     account: awsAccountId,
     region: awsRegion,
   },
-  description: `HQMemes ${environment} infrastructure (ca-central-1)`,
+  frontendDomain,
+  assetsDomain,
+  hostedZoneId,
+  description: `${projectName} ${environment} CloudFront certificates (us-east-1)`,
   tags: {
     Project: projectName,
     Environment: environment,
     ManagedBy: 'cdk',
-    Stack: 'application',
+    Stack: 'certificates',
   },
 })
 
 app.synth()
-
