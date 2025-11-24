@@ -71,24 +71,11 @@ export class HQMemesStack extends cdk.Stack {
     })
 
     // 6. CloudFront (requires us-east-1 for certificates)
-    // Note: Certificates must be created in a separate stack (certificates-app.ts)
-    // You can either:
-    // 1. Deploy certificates stack first and use the ARNs
-    // 2. Use environment variables for certificate ARNs
+    // Note: Certificates must be created in a separate stack
+    // Pass certificate ARNs via environment variables: FRONTEND_CERTIFICATE_ARN and ASSETS_CERTIFICATE_ARN
     const frontendCertArn = process.env.FRONTEND_CERTIFICATE_ARN
     const assetsCertArn = process.env.ASSETS_CERTIFICATE_ARN
 
-
-    console.log("******************************")
-    console.log("******************************")
-    console.log("******************************")
-    console.log(frontendCertArn);
-    console.log(assetsCertArn);
-    console.log("******************************")
-    console.log("******************************")
-    console.log("******************************")
-
-    
     const cloudFrontStack = new CloudFrontStack(this, 'CloudFrontStack', {
       projectName: config.projectName,
       environment: config.environment,

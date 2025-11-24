@@ -49,6 +49,9 @@ jobs:
     needs: detect-changes
     runs-on: ubuntu-latest
     if: needs.detect-changes.outputs.infra == 'true'
+    outputs:
+      frontend-cert-arn: ${{ steps.wait-certs.outputs.frontend-cert-arn }}
+      assets-cert-arn: ${{ steps.wait-certs.outputs.assets-cert-arn }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,24 +76,25 @@ jobs:
         run: npm run deploy:certificates
 
       - name: Wait for ACM certificate validation
+        id: wait-certs
         run: |
           set -euo pipefail
-          
+
           FRONTEND_CERT_ARN=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-certificates-stack \
             --region us-east-1 \
             --query "Stacks[0].Outputs[?OutputKey=='FrontendCertificateArn'].OutputValue" \
             --output text)
-          
+
           ASSETS_CERT_ARN=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-certificates-stack \
             --region us-east-1 \
             --query "Stacks[0].Outputs[?OutputKey=='AssetsCertificateArn'].OutputValue" \
             --output text)
-          
+
           echo "Frontend cert ARN: $FRONTEND_CERT_ARN"
           echo "Assets cert ARN: $ASSETS_CERT_ARN"
-          
+
           # Poll for certificate issuance (max 30 attempts × 10 seconds = 5 minutes)
           for i in $(seq 1 30); do
             status=$(aws acm describe-certificate \
@@ -110,20 +114,22 @@ jobs:
               sleep 10
             fi
           done
-          
+
           if [ "$status" != "ISSUED" ]; then
             echo "❌ Certificates not issued after 5 minutes"
             exit 1
           fi
-          
-          echo "FRONTEND_CERT_ARN=$FRONTEND_CERT_ARN" >> $GITHUB_ENV
-          echo "ASSETS_CERT_ARN=$ASSETS_CERT_ARN" >> $GITHUB_ENV
+
+          {
+            echo "frontend-cert-arn=$FRONTEND_CERT_ARN"
+            echo "assets-cert-arn=$ASSETS_CERT_ARN"
+          } >> $GITHUB_OUTPUT
 
   deploy-infra:
     name: Deploy Infrastructure (ca-central-1)
     needs: [detect-changes, deploy-certificates]
     runs-on: ubuntu-latest
-    if: needs.detect-changes.outputs.infra == 'true' || needs.detect-changes.outputs.backend == 'true'
+    if: always() && (needs.detect-changes.outputs.infra == 'true' || needs.detect-changes.outputs.backend == 'true')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,6 +150,9 @@ jobs:
 
       - name: Deploy application stack
         working-directory: infra
+        env:
+          FRONTEND_CERTIFICATE_ARN: ${{ needs.deploy-certificates.outputs.frontend-cert-arn || '' }}
+          ASSETS_CERTIFICATE_ARN: ${{ needs.deploy-certificates.outputs.assets-cert-arn || '' }}
         run: npm run deploy:app
 
   deploy-frontend-only:
@@ -173,19 +182,19 @@ jobs:
         id: cognito
         run: |
           set -euo pipefail
-          
+
           COGNITO_USER_POOL_ID=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-stack \
             --region ${{ env.AWS_REGION }} \
             --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolId'].OutputValue" \
             --output text 2>/dev/null || true)
-          
+
           COGNITO_CLIENT_ID=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-stack \
             --region ${{ env.AWS_REGION }} \
             --query "Stacks[0].Outputs[?OutputKey=='CognitoClientId'].OutputValue" \
             --output text 2>/dev/null || true)
-          
+
           echo "cognito-user-pool-id=$COGNITO_USER_POOL_ID" >> $GITHUB_OUTPUT
           echo "cognito-client-id=$COGNITO_CLIENT_ID" >> $GITHUB_OUTPUT
 
@@ -227,7 +236,6 @@ jobs:
           aws cloudfront create-invalidation \
             --distribution-id "$CLOUDFRONT_ID" \
             --paths "/*"
-
 
   deploy-frontend-after-infra:
     name: Build & Deploy Frontend (after infra update)

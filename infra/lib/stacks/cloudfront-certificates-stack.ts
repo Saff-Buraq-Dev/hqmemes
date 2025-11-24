@@ -36,12 +36,14 @@ export class CloudFrontCertificatesStack extends cdk.Stack {
     // Certificate for Frontend (must be in us-east-1 for CloudFront)
     this.frontendCertificate = new acm.Certificate(this, 'FrontendCertificate', {
       domainName: props.frontendDomain,
+      subjectAlternativeNames: [props.assetsDomain], // Include assets domain in the same cert
       validation: acm.CertificateValidation.fromDns(hostedZone),
     })
 
     // Certificate for Assets (must be in us-east-1 for CloudFront)
     this.assetsCertificate = new acm.Certificate(this, 'AssetsCertificate', {
       domainName: props.assetsDomain,
+      subjectAlternativeNames: [props.frontendDomain], // Include frontend domain in the same cert
       validation: acm.CertificateValidation.fromDns(hostedZone),
     })
 
