@@ -34,36 +34,42 @@ export class CloudFrontStack extends Construct {
 
     // Note: For CloudFront, ACM certificates MUST be in us-east-1
     // We expect certificates to be created in a separate stack (CloudFrontCertificatesStack)
-    // If certificate ARNs are provided, use them; otherwise, certificates must be created separately
+    // Certificate ARNs MUST be provided
     
     let frontendCertificate: acm.ICertificate | undefined
     let assetsCertificate: acm.ICertificate | undefined
 
     if (props.frontendCertificateArn) {
-      frontendCertificate = acm.Certificate.fromCertificateArn(
-        this,
-        'FrontendCertificate',
-        props.frontendCertificateArn
-      )
+      try {
+        frontendCertificate = acm.Certificate.fromCertificateArn(
+          this,
+          'FrontendCertificate',
+          props.frontendCertificateArn
+        )
+      } catch (e) {
+        console.warn(`Failed to load frontend certificate: ${e}`)
+      }
     }
 
     if (props.assetsCertificateArn) {
-      assetsCertificate = acm.Certificate.fromCertificateArn(
-        this,
-        'AssetsCertificate',
-        props.assetsCertificateArn
-      )
+      try {
+        assetsCertificate = acm.Certificate.fromCertificateArn(
+          this,
+          'AssetsCertificate',
+          props.assetsCertificateArn
+        )
+      } catch (e) {
+        console.warn(`Failed to load assets certificate: ${e}`)
+      }
     }
 
-    // If certificates not provided, we'll skip CloudFront creation
-    // They must be deployed first via certificates stack
+    // Require certificates to be present
     if (!frontendCertificate || !assetsCertificate) {
-      console.warn(
-        '⚠️  CloudFront certificates not provided. ' +
-        'Deploy certificates stack first or set FRONTEND_CERTIFICATE_ARN and ASSETS_CERTIFICATE_ARN in .env'
+      throw new Error(
+        'CloudFront certificates not provided. ' +
+        'Deploy certificates stack first: npm run deploy:certificates\n' +
+        'Then set FRONTEND_CERTIFICATE_ARN and ASSETS_CERTIFICATE_ARN in your .env or pass them as environment variables.'
       )
-      // Create dummy distributions that will be replaced later
-      // This allows synthesis to succeed
     }
 
     // CloudFront Distribution for Frontend

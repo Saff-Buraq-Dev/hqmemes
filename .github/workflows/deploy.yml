@@ -148,11 +148,41 @@ jobs:
           hosted-zone-id: ${{ secrets.HOSTED_ZONE_ID }}
           aws-account-id: ${{ secrets.AWS_ACCOUNT_ID }}
 
+      - name: Get certificate ARNs from CloudFormation
+        id: cert-arns
+        run: |
+          set -euo pipefail
+
+          FRONTEND_CERT_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-certificates-stack \
+            --region us-east-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendCertificateArn'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          ASSETS_CERT_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-certificates-stack \
+            --region us-east-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='AssetsCertificateArn'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -z "$FRONTEND_CERT_ARN" ] || [ -z "$ASSETS_CERT_ARN" ]; then
+            echo "❌ Certificate ARNs not found in CloudFormation"
+            echo "   Ensure certificates stack has been deployed: npm run deploy:certificates"
+            exit 1
+          fi
+
+          echo "✅ Found certificate ARNs:"
+          echo "   Frontend: $FRONTEND_CERT_ARN"
+          echo "   Assets: $ASSETS_CERT_ARN"
+
+          echo "frontend-cert-arn=$FRONTEND_CERT_ARN" >> $GITHUB_OUTPUT
+          echo "assets-cert-arn=$ASSETS_CERT_ARN" >> $GITHUB_OUTPUT
+
       - name: Deploy application stack
         working-directory: infra
         env:
-          FRONTEND_CERTIFICATE_ARN: ${{ needs.deploy-certificates.outputs.frontend-cert-arn || '' }}
-          ASSETS_CERTIFICATE_ARN: ${{ needs.deploy-certificates.outputs.assets-cert-arn || '' }}
+          FRONTEND_CERTIFICATE_ARN: ${{ steps.cert-arns.outputs.frontend-cert-arn }}
+          ASSETS_CERTIFICATE_ARN: ${{ steps.cert-arns.outputs.assets-cert-arn }}
         run: npm run deploy:app
 
   deploy-frontend-only:
